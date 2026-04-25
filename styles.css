@@ -1,0 +1,87 @@
+:root {
+  color-scheme: dark;
+  --bg: #000;
+  --fg: #f3f3f3;
+  --accent: #7dd3fc;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+h1 {
+  font-size: 1.4rem;
+  margin-bottom: 0.75rem;
+}
+
+canvas {
+  width: 100%;
+  border: 1px solid #222;
+  background: #000;
+}
+
+.controls {
+  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+button,
+select {
+  background: #111;
+  border: 1px solid #444;
+  color: var(--fg);
+  padding: 0.55rem 0.8rem;
+  border-radius: 0.5rem;
+  font: inherit;
+}
+
+button:hover,
+select:hover {
+  border-color: var(--accent);
+}
+
+.panels {
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+article {
+  padding: 0.8rem;
+  border: 1px solid #333;
+  border-radius: 0.6rem;
+  min-height: 100px;
+}
+
+h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+@media (max-width: 760px) {
+  .panels {
+    grid-template-columns: 1fr;
+  }
+}
