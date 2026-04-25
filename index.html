@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Emotion Face AI Bot</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <h1>Emotion Face AI Bot</h1>
+      <canvas id="face" width="900" height="560" aria-label="AI bot face"></canvas>
+
+      <section class="controls">
+        <button id="micBtn" type="button">🎤 Start listening</button>
+        <label for="emotionSelect">Emotion</label>
+        <select id="emotionSelect">
+          <option value="neutral">Neutral</option>
+          <option value="happy">Happy</option>
+          <option value="thinking">Thinking</option>
+          <option value="surprised">Surprised</option>
+          <option value="sad">Sad</option>
+          <option value="angry">Angry</option>
+        </select>
+      </section>
+
+      <section class="panels">
+        <article>
+          <h2>You said</h2>
+          <p id="heardText">(nothing yet)</p>
+        </article>
+        <article>
+          <h2>Bot says</h2>
+          <p id="replyText">Hi! Press “Start listening” and talk to me.</p>
+        </article>
+      </section>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
