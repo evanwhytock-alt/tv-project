@@ -43,11 +43,18 @@ const els = {
   restoreInput: $("#restoreInput"),
   installButton: $("#installButton"),
   syncButton: $("#syncButton"),
+  syncButtonText: $("#syncButtonText"),
   syncDialog: $("#syncDialog"),
   closeSyncButton: $("#closeSyncButton"),
-  shareLibraryButton: $("#shareLibraryButton"),
-  importLibraryButton: $("#importLibraryButton"),
-  syncFileStatus: $("#syncFileStatus"),
+  cloudSetup: $("#cloudSetup"),
+  cloudConnected: $("#cloudConnected"),
+  googleSignInButton: $("#googleSignInButton"),
+  cloudStatus: $("#cloudStatus"),
+  cloudAccountName: $("#cloudAccountName"),
+  cloudAvatar: $("#cloudAvatar"),
+  cloudCheck: $("#cloudCheck"),
+  syncNowButton: $("#syncNowButton"),
+  disconnectCloudButton: $("#disconnectCloudButton"),
 };
 let db,
   allGifRecords = [],
@@ -59,9 +66,17 @@ let db,
   deferredInstallPrompt = null,
   toastTimer;
 const objectUrls = new Map();
-const SYNC_PREFIX = "loopbox-";
-let syncPeer = null,
-  syncConnection = null;
+const FIREBASE_CONFIG = window.LOOPBOX_FIREBASE_CONFIG || {};
+const CLOUD_CHUNK_SIZE = 512000;
+let cloudAuth = null,
+  cloudUser = null,
+  cloudApplying = false,
+  cloudFlushTimer = null,
+  cloudPollTimer = null,
+  cloudSyncPromise = null;
+const cloudGifQueue = new Map(),
+  cloudFolderQueue = new Map(),
+  cloudBlobCache = new Map();
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -95,7 +110,10 @@ function put(storeName, value) {
       .transaction(storeName, "readwrite")
       .objectStore(storeName)
       .put(value);
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      if (!cloudApplying) queueCloudRecord(storeName, value);
+      resolve(request.result);
+    };
     request.onerror = () => reject(request.error);
   });
 }
@@ -390,32 +408,6 @@ async function exportBackup() {
   downloadBackupFile(await buildBackupFile());
   showToast("Backup downloaded");
 }
-async function shareLibraryFile() {
-  if (!gifs.length) return showToast("Upload a GIF first");
-  els.syncFileStatus.hidden = false;
-  els.syncFileStatus.textContent = "Preparing your library file…";
-  try {
-    const file = await buildBackupFile();
-    if (navigator.share && navigator.canShare?.({ files: [file] })) {
-      await navigator.share({
-        title: "Loopbox library",
-        text: "Import this file into Loopbox on your other device.",
-        files: [file],
-      });
-      els.syncFileStatus.textContent =
-        "Library file sent. Import it on the other device.";
-    } else {
-      downloadBackupFile(file);
-      els.syncFileStatus.textContent =
-        "Library downloaded. Move it to the other device, then import it.";
-    }
-  } catch (error) {
-    els.syncFileStatus.textContent =
-      error?.name === "AbortError"
-        ? "Sharing cancelled."
-        : "Couldn’t create the file. Try again.";
-  }
-}
 const dataUrlToBlob = async (dataUrl) => (await fetch(dataUrl)).blob();
 async function importBackup(file) {
   try {
@@ -426,271 +418,314 @@ async function importBackup(file) {
     for (const gif of parsed.gifs)
       await put(GIF_STORE, { ...gif, blob: await dataUrlToBlob(gif.blob) });
     await refresh();
-    if (els.syncDialog.open) {
-      els.syncFileStatus.hidden = false;
-      els.syncFileStatus.textContent = `Import complete — ${gifs.length} GIF${gifs.length === 1 ? "" : "s"} saved.`;
-    }
     showToast("Backup imported");
   } catch {
     showToast("That backup file didn’t work");
   }
 }
 
-function resetSyncUi() {
-  els.syncChoice.hidden = false;
-  els.syncSession.hidden = true;
-  els.syncCode.textContent = "------";
-  els.syncStatus.textContent = "Starting secure connection…";
-  els.syncProgressBar.style.width = "8%";
-  els.syncProgressBar.style.background = "";
-  els.syncCodeInput.value = "";
-}
-
-function destroySyncConnection() {
-  if (syncConnection?.open) syncConnection.close();
-  if (syncPeer && !syncPeer.destroyed) syncPeer.destroy();
-  syncConnection = null;
-  syncPeer = null;
-}
-
 function openSyncDialog() {
-  destroySyncConnection();
-  els.syncFileStatus.hidden = true;
-  els.syncFileStatus.textContent = "";
+  renderCloudUi();
+  setCloudStatus(
+    hasCloudConfig()
+      ? ""
+      : "Google sign-in needs the Loopbox Firebase project connected first.",
+    !hasCloudConfig(),
+  );
   els.syncDialog.showModal();
 }
 
-function showSyncSession(code, status) {
-  els.syncChoice.hidden = true;
-  els.syncSession.hidden = false;
-  els.syncCode.textContent = code;
-  els.syncStatus.textContent = status;
-}
-
-function makeSyncCode() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const values = crypto.getRandomValues(new Uint8Array(6));
-  return [...values].map((value) => alphabet[value % alphabet.length]).join("");
-}
-
-function cleanSyncCode(value) {
-  return value
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "")
-    .slice(0, 6);
-}
-
-function syncFailed(message) {
-  els.syncStatus.textContent = message;
-  els.syncProgressBar.style.width = "100%";
-  els.syncProgressBar.style.background = "var(--danger)";
-}
-
-function startSyncHost() {
-  if (!window.Peer)
-    return syncFailed("Sync couldn’t load. Check your internet.");
-  destroySyncConnection();
-  const code = makeSyncCode();
-  showSyncSession(code, "Creating your code…");
-  syncPeer = new Peer(`${SYNC_PREFIX}${code}`, { debug: 2 });
-  syncPeer.on("open", () => {
-    els.syncStatus.textContent = "Enter this code on your other device";
-    els.syncProgressBar.style.width = "14%";
-  });
-  syncPeer.on("connection", (connection) => {
-    if (syncConnection?.open) return connection.close();
-    attachSyncConnection(connection);
-  });
-  syncPeer.on("error", (error) => {
-    if (error.type === "unavailable-id") return startSyncHost();
-    syncFailed("Couldn’t create the code. Try again.");
-  });
-}
-
-function joinSyncHost() {
-  if (!window.Peer)
-    return syncFailed("Sync couldn’t load. Check your internet.");
-  const code = cleanSyncCode(els.syncCodeInput.value);
-  els.syncCodeInput.value = code;
-  if (code.length !== 6) return showToast("Enter the 6-character code");
-  destroySyncConnection();
-  showSyncSession(code, "Finding your other device…");
-  const clientId = `${SYNC_PREFIX}client-${makeSyncCode()}-${Date.now().toString(36)}`;
-  syncPeer = new Peer(clientId, { debug: 2 });
-  syncPeer.on("open", () => {
-    els.syncStatus.textContent = "Code found — connecting devices…";
-    attachSyncConnection(
-      syncPeer.connect(`${SYNC_PREFIX}${code}`, {
-        reliable: true,
-        serialization: "binary",
-      }),
-    );
-  });
-  syncPeer.on("error", (error) => {
-    syncFailed(
-      error.type === "peer-unavailable"
-        ? "Code not found. Check it and try again."
-        : "Couldn’t connect. Try again.",
-    );
-  });
-}
-
-function attachSyncConnection(connection) {
-  syncConnection = connection;
-  const state = {
-    started: false,
-    sendDone: false,
-    receiveDone: false,
-    completed: false,
-    received: 0,
-    total: 0,
-    pendingMeta: null,
-    records: new Map(allGifRecords.map((record) => [record.id, record])),
-    queue: Promise.resolve(),
-  };
-  const begin = () => {
-    if (state.started) return;
-    clearTimeout(connectionTimeout);
-    state.started = true;
-    els.syncStatus.textContent = "Connected — merging libraries…";
-    els.syncProgressBar.style.width = "24%";
-    sendSyncLibrary(connection, state).catch(() =>
-      syncFailed("The transfer stopped. Keep both devices open and try again."),
-    );
-  };
-  const connectionTimeout = setTimeout(() => {
-    if (!state.started)
-      syncFailed(
-        "Couldn’t reach the other device. Check the code and try again.",
-      );
-  }, 15000);
-  connection.on("open", begin);
-  if (connection.open) begin();
-  connection.on("data", (data) => {
-    state.queue = state.queue
-      .then(() => handleSyncData(data, state))
-      .catch(() => syncFailed("A GIF couldn’t transfer. Try syncing again."));
-  });
-  connection.on("error", () =>
-    syncFailed("The connection failed. Keep both devices open and try again."),
+function hasCloudConfig() {
+  return Boolean(
+    FIREBASE_CONFIG.apiKey &&
+      FIREBASE_CONFIG.authDomain &&
+      FIREBASE_CONFIG.databaseURL &&
+      FIREBASE_CONFIG.projectId,
   );
-  connection.on("close", () => {
-    if (!state.completed) syncFailed("Connection closed before sync finished.");
-  });
 }
 
-async function waitForSendBuffer(connection) {
-  while (connection.open && connection.bufferSize > 8) {
-    await new Promise((resolve) => setTimeout(resolve, 35));
-  }
-  if (!connection.open) throw new Error("Connection closed");
+function setCloudStatus(message, error = false) {
+  els.cloudStatus.hidden = !message;
+  els.cloudStatus.textContent = message;
+  els.cloudStatus.classList.toggle("error", error);
 }
 
-async function sendSyncLibrary(connection, state) {
-  const records = await getAll(GIF_STORE);
-  const currentFolders = await getAll(FOLDER_STORE);
-  connection.send({
-    type: "start",
-    version: 1,
-    total: records.length,
-    folders: currentFolders,
-  });
-  for (const record of records) {
-    await waitForSendBuffer(connection);
-    if (record.deletedAt) {
-      connection.send({
-        type: "gif-delete",
-        record: {
-          id: record.id,
-          deletedAt: record.deletedAt,
-          updatedAt: record.updatedAt || record.deletedAt,
-        },
-      });
-      continue;
+function renderCloudUi() {
+  const connected = Boolean(cloudUser);
+  els.cloudSetup.hidden = connected;
+  els.cloudConnected.hidden = !connected;
+  els.syncButton.classList.toggle("cloud-on", connected);
+  els.syncButtonText.textContent = connected ? "Synced" : "Sign in";
+  els.syncButton.setAttribute(
+    "aria-label",
+    connected ? "Open Google sync" : "Sign in to sync",
+  );
+  if (!connected) return;
+  els.cloudAccountName.textContent =
+    cloudUser.email || cloudUser.displayName || "Google account";
+  const photo = cloudUser.photoURL;
+  els.cloudAvatar.hidden = !photo;
+  els.cloudCheck.hidden = Boolean(photo);
+  if (photo) els.cloudAvatar.src = photo;
+}
+
+async function signInWithGoogle() {
+  if (!hasCloudConfig())
+    return setCloudStatus(
+      "Google sign-in needs the Loopbox Firebase project connected first.",
+      true,
+    );
+  if (!cloudAuth)
+    return setCloudStatus("Google sign-in couldn’t load. Check your internet.", true);
+  els.googleSignInButton.disabled = true;
+  setCloudStatus("Opening Google sign-in…");
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    await cloudAuth.signInWithPopup(provider);
+  } catch (error) {
+    if (error?.code === "auth/popup-closed-by-user") setCloudStatus("");
+    else if (error?.code === "auth/unauthorized-domain")
+      setCloudStatus("This Loopbox website still needs to be allowed in Firebase.", true);
+    else {
+      console.error(error);
+      setCloudStatus("Google sign-in didn’t work. Please try again.", true);
     }
-    const { blob, ...metadata } = record;
-    connection.send({ type: "gif-meta", record: metadata });
-    connection.send(blob);
+  } finally {
+    els.googleSignInButton.disabled = false;
   }
-  await waitForSendBuffer(connection);
-  connection.send({ type: "complete" });
-  state.sendDone = true;
-  await finishSyncIfReady(state);
 }
 
-function recordTime(record) {
+async function signOutCloud() {
+  if (cloudAuth) await cloudAuth.signOut();
+  setCloudStatus("Signed out on this device.");
+}
+
+async function firebaseData(path, options = {}, retry = true) {
+  if (!cloudUser) throw new Error("Google sync is disconnected");
+  const token = await cloudUser.getIdToken(!retry);
+  const root = String(FIREBASE_CONFIG.databaseURL).replace(/\/$/, "");
+  const response = await fetch(
+    `${root}/${path}.json?auth=${encodeURIComponent(token)}`,
+    {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+    },
+  );
+  if (response.status === 401 && retry) return firebaseData(path, options, false);
+  if (!response.ok) throw new Error(`Cloud request failed (${response.status})`);
+  if (response.status === 204) return null;
+  return response.json();
+}
+
+function queueCloudRecord(storeName, value) {
+  if (!cloudUser || !value?.id) return;
+  if (storeName === GIF_STORE) cloudGifQueue.set(value.id, value);
+  if (storeName === FOLDER_STORE) cloudFolderQueue.set(value.id, value);
+  clearTimeout(cloudFlushTimer);
+  cloudFlushTimer = setTimeout(() => {
+    flushCloudQueue().catch((error) => {
+      console.error(error);
+      setCloudStatus("A change is waiting to sync. We’ll retry.", true);
+    });
+  }, 750);
+}
+
+async function blobToCloudChunks(blob, id) {
+  const cached = cloudBlobCache.get(id);
+  if (cached?.size === blob.size) return cached.chunks;
+  const dataUrl = await blobToDataUrl(blob);
+  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  const chunks = {};
+  for (let offset = 0, index = 0; offset < base64.length; index += 1) {
+    chunks[index] = base64.slice(offset, offset + CLOUD_CHUNK_SIZE);
+    offset += CLOUD_CHUNK_SIZE;
+  }
+  cloudBlobCache.set(id, { size: blob.size, chunks });
+  return chunks;
+}
+
+async function uploadCloudGif(record) {
+  const { blob, ...metadata } = record;
+  let payload = metadata;
+  if (!record.deletedAt) {
+    if (!(blob instanceof Blob)) throw new Error("A GIF is missing its file data");
+    payload = {
+      ...metadata,
+      mime: blob.type || "image/gif",
+      chunks: await blobToCloudChunks(blob, record.id),
+    };
+  } else cloudBlobCache.delete(record.id);
+  await firebaseData(
+    `users/${cloudUser.uid}/gifs/${encodeURIComponent(record.id)}`,
+    { method: "PUT", body: JSON.stringify(payload) },
+  );
+}
+
+async function flushCloudQueue() {
+  if (!cloudUser || !hasCloudConfig()) return;
+  clearTimeout(cloudFlushTimer);
+  cloudFlushTimer = null;
+  const gifRecords = [...cloudGifQueue.values()];
+  const folderRecords = [...cloudFolderQueue.values()];
+  cloudGifQueue.clear();
+  cloudFolderQueue.clear();
+  for (const folder of folderRecords)
+    await firebaseData(
+      `users/${cloudUser.uid}/folders/${encodeURIComponent(folder.id)}`,
+      { method: "PUT", body: JSON.stringify(folder) },
+    );
+  for (const gif of gifRecords) await uploadCloudGif(gif);
+}
+
+function cloudChunksToBlob(chunks, mime = "image/gif") {
+  const ordered = (Array.isArray(chunks)
+    ? chunks
+    : Object.keys(chunks || {})
+        .sort((a, b) => Number(a) - Number(b))
+        .map((key) => chunks[key])
+  ).filter(Boolean);
+  const parts = ordered.map((chunk) => {
+    const binary = atob(chunk);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1)
+      bytes[index] = binary.charCodeAt(index);
+    return bytes;
+  });
+  return new Blob(parts, { type: mime });
+}
+
+function cloudRecordTime(record) {
   return record?.updatedAt || record?.createdAt || 0;
 }
 
-async function handleSyncData(data, state) {
-  if (data?.type === "start") {
-    state.total = Number(data.total) || 0;
-    for (const folder of data.folders || []) await put(FOLDER_STORE, folder);
-    els.syncStatus.textContent = state.total
-      ? `Receiving 0 of ${state.total} GIFs…`
-      : "Other device has no extra GIFs";
-    return;
-  }
-  if (data?.type === "gif-meta") {
-    const existing = state.records.get(data.record.id);
-    state.pendingMeta = {
-      record: data.record,
-      accept: !existing || recordTime(data.record) >= recordTime(existing),
-    };
-    return;
-  }
-  if (
-    data instanceof Blob ||
-    data instanceof ArrayBuffer ||
-    ArrayBuffer.isView(data)
-  ) {
-    if (!state.pendingMeta) return;
-    const { record, accept } = state.pendingMeta;
-    state.pendingMeta = null;
-    const blob =
-      data instanceof Blob ? data : new Blob([data], { type: "image/gif" });
-    if (accept) {
-      const incoming = { ...record, blob, size: record.size || blob.size };
-      revokeUrl(incoming.id);
-      await put(GIF_STORE, incoming);
-      state.records.set(incoming.id, incoming);
+async function runCloudSync() {
+  if (!cloudUser || !hasCloudConfig()) return;
+  setCloudStatus("Syncing changes…");
+  await flushCloudQueue();
+  const remote =
+    (await firebaseData(`users/${cloudUser.uid}`, { method: "GET" })) || {};
+  const localGifs = await getAll(GIF_STORE);
+  const localFolders = await getAll(FOLDER_STORE);
+  const localGifMap = new Map(localGifs.map((record) => [record.id, record]));
+  const localFolderMap = new Map(
+    localFolders.map((record) => [record.id, record]),
+  );
+  const remoteGifs = Object.values(remote.gifs || {});
+  const remoteFolders = Object.values(remote.folders || {});
+  cloudApplying = true;
+  try {
+    for (const folder of remoteFolders) {
+      const local = localFolderMap.get(folder.id);
+      if (!local || cloudRecordTime(folder) > cloudRecordTime(local))
+        await put(FOLDER_STORE, folder);
     }
-    updateSyncReceiveProgress(state);
-    return;
-  }
-  if (data?.type === "gif-delete") {
-    const existing = state.records.get(data.record.id);
-    if (!existing || recordTime(data.record) >= recordTime(existing)) {
-      const tombstone = { ...(existing || {}), ...data.record };
-      revokeUrl(tombstone.id);
-      await put(GIF_STORE, tombstone);
-      state.records.set(tombstone.id, tombstone);
+    for (const remoteGif of remoteGifs) {
+      const local = localGifMap.get(remoteGif.id);
+      if (local && cloudRecordTime(local) > cloudRecordTime(remoteGif)) continue;
+      const { chunks, mime, ...metadata } = remoteGif;
+      let incoming;
+      if (remoteGif.deletedAt)
+        incoming = {
+          ...(local || {}),
+          ...metadata,
+          deletedAt: remoteGif.deletedAt,
+        };
+      else if (chunks)
+        incoming = {
+          ...metadata,
+          blob: cloudChunksToBlob(chunks, mime),
+          size: metadata.size || 0,
+        };
+      if (incoming) {
+        revokeUrl(incoming.id);
+        await put(GIF_STORE, incoming);
+      }
     }
-    updateSyncReceiveProgress(state);
-    return;
+  } finally {
+    cloudApplying = false;
   }
-  if (data?.type === "complete") {
-    state.receiveDone = true;
-    await finishSyncIfReady(state);
+  const remoteGifMap = new Map(remoteGifs.map((record) => [record.id, record]));
+  const remoteFolderMap = new Map(
+    remoteFolders.map((record) => [record.id, record]),
+  );
+  for (const local of await getAll(GIF_STORE)) {
+    const remoteRecord = remoteGifMap.get(local.id);
+    if (!remoteRecord || cloudRecordTime(local) > cloudRecordTime(remoteRecord))
+      queueCloudRecord(GIF_STORE, local);
   }
-}
-
-function updateSyncReceiveProgress(state) {
-  state.received += 1;
-  const percent = state.total
-    ? 24 + Math.round((state.received / state.total) * 66)
-    : 90;
-  els.syncProgressBar.style.width = `${Math.min(90, percent)}%`;
-  els.syncStatus.textContent = `Receiving ${state.received} of ${state.total} GIFs…`;
-}
-
-async function finishSyncIfReady(state) {
-  if (!state.sendDone || !state.receiveDone || state.completed) return;
-  state.completed = true;
+  for (const local of await getAll(FOLDER_STORE)) {
+    const remoteRecord = remoteFolderMap.get(local.id);
+    if (!remoteRecord || cloudRecordTime(local) > cloudRecordTime(remoteRecord))
+      queueCloudRecord(FOLDER_STORE, local);
+  }
+  await flushCloudQueue();
   await refresh();
-  els.syncProgressBar.style.width = "100%";
-  els.syncStatus.textContent = `Sync complete — ${gifs.length} GIF${gifs.length === 1 ? "" : "s"} saved`;
-  showToast("Devices synced");
+  setCloudStatus(`Up to date — ${gifs.length} GIF${gifs.length === 1 ? "" : "s"}`);
+}
+
+async function syncCloudNow() {
+  if (cloudSyncPromise) return cloudSyncPromise;
+  cloudSyncPromise = runCloudSync()
+    .catch((error) => {
+      console.error(error);
+      setCloudStatus(
+        navigator.onLine
+          ? "Couldn’t reach Google sync. We’ll retry."
+          : "Offline — changes will sync when you reconnect.",
+        true,
+      );
+      throw error;
+    })
+    .finally(() => {
+      cloudSyncPromise = null;
+    });
+  return cloudSyncPromise;
+}
+
+function startCloudPolling() {
+  clearInterval(cloudPollTimer);
+  if (!cloudUser) return;
+  cloudPollTimer = setInterval(() => {
+    if (document.visibilityState === "visible" && navigator.onLine)
+      syncCloudNow().catch(() => {});
+  }, 12000);
+}
+
+function handleCloudUser(user) {
+  cloudUser = user;
+  renderCloudUi();
+  clearInterval(cloudPollTimer);
+  if (!user) {
+    cloudGifQueue.clear();
+    cloudFolderQueue.clear();
+    return;
+  }
+  startCloudPolling();
+  syncCloudNow()
+    .then(() => showToast("Google sync is on"))
+    .catch(() => {});
+}
+
+async function initCloudAuth() {
+  if (!hasCloudConfig() || !window.firebase) {
+    renderCloudUi();
+    return;
+  }
+  try {
+    const app = firebase.apps.length
+      ? firebase.app()
+      : firebase.initializeApp(FIREBASE_CONFIG);
+    cloudAuth = app.auth();
+    await cloudAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+    cloudAuth.onAuthStateChanged(handleCloudUser);
+  } catch (error) {
+    console.error(error);
+    setCloudStatus("Google sign-in couldn’t start.", true);
+  }
 }
 
 function registerEvents() {
@@ -732,7 +767,8 @@ function registerEvents() {
     event.preventDefault();
     const name = els.folderNameInput.value.trim();
     if (!name) return;
-    const folder = { id: makeId(), name, createdAt: Date.now() };
+    const now = Date.now();
+    const folder = { id: makeId(), name, createdAt: now, updatedAt: now };
     await put(FOLDER_STORE, folder);
     els.folderDialog.close();
     currentView = `folder:${folder.id}`;
@@ -797,11 +833,16 @@ function registerEvents() {
   });
   els.syncButton.addEventListener("click", openSyncDialog);
   els.closeSyncButton.addEventListener("click", () => els.syncDialog.close());
-  els.syncDialog.addEventListener("close", destroySyncConnection);
-  els.shareLibraryButton.addEventListener("click", shareLibraryFile);
-  els.importLibraryButton.addEventListener("click", () =>
-    els.restoreInput.click(),
+  els.googleSignInButton.addEventListener("click", signInWithGoogle);
+  els.syncNowButton.addEventListener("click", () =>
+    syncCloudNow().catch(() => {}),
   );
+  els.disconnectCloudButton.addEventListener("click", signOutCloud);
+  window.addEventListener("online", () => syncCloudNow().catch(() => {}));
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && cloudUser)
+      syncCloudNow().catch(() => {});
+  });
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
     deferredInstallPrompt = event;
@@ -820,9 +861,10 @@ async function init() {
     db = await openDatabase();
     registerEvents();
     await refresh();
+    await initCloudAuth();
     if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
     if ("serviceWorker" in navigator)
-      navigator.serviceWorker.register("./sw.js?v=6").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=8").catch(() => {});
   } catch (error) {
     console.error(error);
     showToast("Loopbox couldn’t open its saved library");

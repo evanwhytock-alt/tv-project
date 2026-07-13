@@ -159,6 +159,11 @@ button {
   border-color: #667184;
   background: #181c25;
 }
+.button.sync.cloud-on {
+  border-color: #657b4f;
+  background: #1b2317;
+  color: var(--accent);
+}
 .button.compact {
   min-height: 43px;
 }
@@ -717,6 +722,94 @@ dialog select:focus {
   font-size: 22px;
   cursor: pointer;
 }
+.cloud-setup {
+  display: grid;
+  gap: 12px;
+}
+.cloud-setup[hidden],
+.cloud-connected[hidden] {
+  display: none;
+}
+.google-signin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 18px;
+  border: 1px solid #d5d8df;
+  border-radius: 12px;
+  background: #fff;
+  color: #202124;
+  font-weight: 750;
+  cursor: pointer;
+}
+.google-signin:hover {
+  background: #f7f8fa;
+}
+.google-signin:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.google-signin svg {
+  width: 22px;
+  height: 22px;
+}
+.cloud-setup > small {
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+}
+.cloud-connected {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 17px;
+  border: 1px solid #38482f;
+  border-radius: 15px;
+  background: #131a11;
+}
+.cloud-check,
+.cloud-connected > img {
+  grid-row: 1;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+}
+.cloud-check {
+  display: grid;
+  place-items: center;
+  background: #26351f;
+  color: var(--accent);
+  font-size: 22px;
+  font-weight: 900;
+}
+.cloud-connected > img {
+  object-fit: cover;
+}
+.cloud-connected strong,
+.cloud-connected small {
+  display: block;
+}
+.cloud-connected small {
+  max-width: 330px;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cloud-connected .button {
+  grid-column: 1 / -1;
+  min-height: 43px;
+}
+.cloud-connected #disconnectCloudButton {
+  border: 1px solid #3a414e;
+  background: #1b2029;
+  color: #c1c6d0;
+}
 .sync-choice {
   display: grid;
   gap: 14px;
@@ -863,6 +956,10 @@ dialog select:focus {
   font-size: 12px;
   text-align: center;
 }
+.sync-file-status.error {
+  border-color: var(--danger);
+  color: #ff9ba3;
+}
 .toast {
   position: fixed;
   z-index: 200;
@@ -911,6 +1008,13 @@ dialog select:focus {
   .button.compact {
     width: 43px;
     padding: 0;
+  }
+  .button.sync.compact {
+    width: auto;
+    padding: 0 12px;
+  }
+  .button.sync.compact span {
+    display: inline;
   }
   .header-actions {
     gap: 6px;
