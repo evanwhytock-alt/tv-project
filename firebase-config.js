@@ -2,7 +2,7 @@
 window.LOOPBOX_FIREBASE_CONFIG = {
   apiKey: "AIzaSyALDR28kPS2q4oqsDLvLLqZ3u3dx71wgdY",
   authDomain: "loopbox-3507c.firebaseapp.com",
-  databaseURL: "",
+  databaseURL: "https://loopbox-3507c-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "loopbox-3507c",
   storageBucket: "loopbox-3507c.firebasestorage.app",
   messagingSenderId: "282638658375",
