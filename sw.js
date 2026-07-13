@@ -1,4 +1,4 @@
-const CACHE = "loopbox-v3",
+const CACHE = "loopbox-v4",
   SHELL = [
     "./",
     "./index.html",
