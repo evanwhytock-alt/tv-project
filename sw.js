@@ -1,9 +1,9 @@
-const CACHE = "loopbox-v5",
+const CACHE = "loopbox-v6",
   SHELL = [
     "./",
     "./index.html",
-    "./styles.css",
-    "./app.js",
+    "./styles.css?v=6",
+    "./app.js?v=6",
     "./manifest.webmanifest",
     "./icon.svg",
     "./icon-192.png",
