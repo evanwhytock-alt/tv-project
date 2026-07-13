@@ -477,7 +477,8 @@ function joinSyncHost() {
   if (code.length !== 6) return showToast("Enter the 6-character code");
   destroySyncConnection();
   showSyncSession(code, "Finding your other device…");
-  syncPeer = new Peer();
+  const clientId = `${SYNC_PREFIX}client-${makeSyncCode()}-${Date.now().toString(36)}`;
+  syncPeer = new Peer(clientId);
   syncPeer.on("open", () => {
     attachSyncConnection(
       syncPeer.connect(`${SYNC_PREFIX}${code}`, {
@@ -510,6 +511,7 @@ function attachSyncConnection(connection) {
   };
   const begin = () => {
     if (state.started) return;
+    clearTimeout(connectionTimeout);
     state.started = true;
     els.syncStatus.textContent = "Connected — merging libraries…";
     els.syncProgressBar.style.width = "24%";
@@ -517,6 +519,12 @@ function attachSyncConnection(connection) {
       syncFailed("The transfer stopped. Keep both devices open and try again."),
     );
   };
+  const connectionTimeout = setTimeout(() => {
+    if (!state.started)
+      syncFailed(
+        "Couldn’t reach the other device. Check the code and try again.",
+      );
+  }, 15000);
   connection.on("open", begin);
   if (connection.open) begin();
   connection.on("data", (data) => {
