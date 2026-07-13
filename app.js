@@ -45,14 +45,9 @@ const els = {
   syncButton: $("#syncButton"),
   syncDialog: $("#syncDialog"),
   closeSyncButton: $("#closeSyncButton"),
-  createSyncButton: $("#createSyncButton"),
-  joinSyncButton: $("#joinSyncButton"),
-  syncCodeInput: $("#syncCodeInput"),
-  syncChoice: $("#syncChoice"),
-  syncSession: $("#syncSession"),
-  syncCode: $("#syncCode"),
-  syncStatus: $("#syncStatus"),
-  syncProgressBar: $("#syncProgressBar"),
+  shareLibraryButton: $("#shareLibraryButton"),
+  importLibraryButton: $("#importLibraryButton"),
+  syncFileStatus: $("#syncFileStatus"),
 };
 let db,
   allGifRecords = [],
@@ -363,25 +358,63 @@ function blobToDataUrl(blob) {
     reader.readAsDataURL(blob);
   });
 }
-async function exportBackup() {
-  if (!gifs.length) return showToast("Nothing to back up yet");
-  showToast("Preparing backup…");
+async function buildBackupFile() {
   const exported = [];
   for (const gif of gifs)
     exported.push({ ...gif, blob: await blobToDataUrl(gif.blob) });
   const data = JSON.stringify({
-      version: 1,
-      exportedAt: Date.now(),
-      folders,
-      gifs: exported,
-    }),
-    url = URL.createObjectURL(new Blob([data], { type: "application/json" })),
-    link = document.createElement("a");
+    version: 1,
+    exportedAt: Date.now(),
+    folders,
+    gifs: exported,
+  });
+  return new File(
+    [data],
+    `loopbox-library-${new Date().toISOString().slice(0, 10)}.json`,
+    {
+      type: "application/json",
+    },
+  );
+}
+function downloadBackupFile(file) {
+  const url = URL.createObjectURL(file);
+  const link = document.createElement("a");
   link.href = url;
-  link.download = `loopbox-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  link.download = file.name;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+async function exportBackup() {
+  if (!gifs.length) return showToast("Nothing to back up yet");
+  showToast("Preparing backup…");
+  downloadBackupFile(await buildBackupFile());
   showToast("Backup downloaded");
+}
+async function shareLibraryFile() {
+  if (!gifs.length) return showToast("Upload a GIF first");
+  els.syncFileStatus.hidden = false;
+  els.syncFileStatus.textContent = "Preparing your library file…";
+  try {
+    const file = await buildBackupFile();
+    if (navigator.share && navigator.canShare?.({ files: [file] })) {
+      await navigator.share({
+        title: "Loopbox library",
+        text: "Import this file into Loopbox on your other device.",
+        files: [file],
+      });
+      els.syncFileStatus.textContent =
+        "Library file sent. Import it on the other device.";
+    } else {
+      downloadBackupFile(file);
+      els.syncFileStatus.textContent =
+        "Library downloaded. Move it to the other device, then import it.";
+    }
+  } catch (error) {
+    els.syncFileStatus.textContent =
+      error?.name === "AbortError"
+        ? "Sharing cancelled."
+        : "Couldn’t create the file. Try again.";
+  }
 }
 const dataUrlToBlob = async (dataUrl) => (await fetch(dataUrl)).blob();
 async function importBackup(file) {
@@ -393,6 +426,10 @@ async function importBackup(file) {
     for (const gif of parsed.gifs)
       await put(GIF_STORE, { ...gif, blob: await dataUrlToBlob(gif.blob) });
     await refresh();
+    if (els.syncDialog.open) {
+      els.syncFileStatus.hidden = false;
+      els.syncFileStatus.textContent = `Import complete — ${gifs.length} GIF${gifs.length === 1 ? "" : "s"} saved.`;
+    }
     showToast("Backup imported");
   } catch {
     showToast("That backup file didn’t work");
@@ -418,7 +455,8 @@ function destroySyncConnection() {
 
 function openSyncDialog() {
   destroySyncConnection();
-  resetSyncUi();
+  els.syncFileStatus.hidden = true;
+  els.syncFileStatus.textContent = "";
   els.syncDialog.showModal();
 }
 
@@ -760,14 +798,10 @@ function registerEvents() {
   els.syncButton.addEventListener("click", openSyncDialog);
   els.closeSyncButton.addEventListener("click", () => els.syncDialog.close());
   els.syncDialog.addEventListener("close", destroySyncConnection);
-  els.createSyncButton.addEventListener("click", startSyncHost);
-  els.joinSyncButton.addEventListener("click", joinSyncHost);
-  els.syncCodeInput.addEventListener("input", () => {
-    els.syncCodeInput.value = cleanSyncCode(els.syncCodeInput.value);
-  });
-  els.syncCodeInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") joinSyncHost();
-  });
+  els.shareLibraryButton.addEventListener("click", shareLibraryFile);
+  els.importLibraryButton.addEventListener("click", () =>
+    els.restoreInput.click(),
+  );
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
     deferredInstallPrompt = event;
