@@ -9,7 +9,7 @@ A private, local-first GIF library that runs as a static website.
 - Search, favourites, folders, sorting, renaming, and deletion
 - Restores saved GIFs after closing and reopening
 - Offline PWA support
-- Two-way device sync using a six-character connection code
+- Cross-device library sharing through AirDrop, Files, or a downloaded backup
 - Export and import a complete library backup for moving between devices
 
 ## GitHub Pages
@@ -18,4 +18,4 @@ Open the repository's **Settings → Pages**, choose **Deploy from a branch**, t
 
 ## Storage note
 
-GIFs remain stored privately in each browser. **Sync devices** securely merges two libraries while both devices have Loopbox open. The shared connection code is temporary; once the transfer finishes, the GIFs stay saved on both devices.
+GIFs remain stored privately in each browser. Use **Sync** to send one library file through AirDrop, Files, or a normal download. Importing that file on another device merges the libraries without removing GIFs already there.
