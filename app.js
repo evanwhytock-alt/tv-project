@@ -454,7 +454,7 @@ function startSyncHost() {
   destroySyncConnection();
   const code = makeSyncCode();
   showSyncSession(code, "Creating your code…");
-  syncPeer = new Peer(`${SYNC_PREFIX}${code}`);
+  syncPeer = new Peer(`${SYNC_PREFIX}${code}`, { debug: 2 });
   syncPeer.on("open", () => {
     els.syncStatus.textContent = "Enter this code on your other device";
     els.syncProgressBar.style.width = "14%";
@@ -478,8 +478,9 @@ function joinSyncHost() {
   destroySyncConnection();
   showSyncSession(code, "Finding your other device…");
   const clientId = `${SYNC_PREFIX}client-${makeSyncCode()}-${Date.now().toString(36)}`;
-  syncPeer = new Peer(clientId);
+  syncPeer = new Peer(clientId, { debug: 2 });
   syncPeer.on("open", () => {
+    els.syncStatus.textContent = "Code found — connecting devices…";
     attachSyncConnection(
       syncPeer.connect(`${SYNC_PREFIX}${code}`, {
         reliable: true,
