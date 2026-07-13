@@ -853,6 +853,16 @@ dialog select:focus {
   font-size: 10px !important;
   text-align: center;
 }
+.sync-file-status {
+  margin: 16px 0 0;
+  padding: 12px;
+  border: 1px solid #38432f;
+  border-radius: 11px;
+  background: #141a12;
+  color: #d9ded3;
+  font-size: 12px;
+  text-align: center;
+}
 .toast {
   position: fixed;
   z-index: 200;
