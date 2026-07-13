@@ -864,7 +864,7 @@ async function init() {
     await initCloudAuth();
     if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
     if ("serviceWorker" in navigator)
-      navigator.serviceWorker.register("./sw.js?v=8").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=9").catch(() => {});
   } catch (error) {
     console.error(error);
     showToast("Loopbox couldn’t open its saved library");
