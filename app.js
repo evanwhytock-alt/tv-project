@@ -822,7 +822,7 @@ async function init() {
     await refresh();
     if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
     if ("serviceWorker" in navigator)
-      navigator.serviceWorker.register("./sw.js").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=6").catch(() => {});
   } catch (error) {
     console.error(error);
     showToast("Loopbox couldn’t open its saved library");
