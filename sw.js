@@ -1,9 +1,10 @@
-const CACHE = "loopbox-v6",
+const CACHE = "loopbox-v8",
   SHELL = [
     "./",
     "./index.html",
-    "./styles.css?v=6",
-    "./app.js?v=6",
+    "./styles.css?v=8",
+    "./firebase-config.js?v=8",
+    "./app.js?v=8",
     "./manifest.webmanifest",
     "./icon.svg",
     "./icon-192.png",
